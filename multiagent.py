@@ -595,8 +595,8 @@ def run_agri_lab(cfg: dict) -> dict:
 
 # ---------------- UI ----------------
 st.sidebar.subheader("Provider Status")
-st.sidebar.write(f"OpenAI key detected: {'✅' if os.getenv('OPENAI_API_KEY') else '❌'}")
-st.sidebar.write(f"Gemini key detected: {'✅' if os.getenv('GEMINI_API_KEY') else '❌'}")
+st.sidebar.write(f"OpenAI GPT detected: {'✅' if os.getenv('OPENAI_API_KEY') else '❌'}")
+st.sidebar.write(f"Google Gemini detected: {'✅' if os.getenv('GEMINI_API_KEY') else '❌'}")
 if HAS_GEMINI and os.getenv("GEMINI_API_KEY"):
     if st.sidebar.button("Test Gemini call", key="sidebar_test_gemini_v26"):
         try:
@@ -772,4 +772,4 @@ with tab2:
         st.dataframe(X_ef, use_container_width=True, height=260, key="a_raw_df_v26")
 
 # ---------------- Footer ----------------
-st.caption("v2.6 • Role-specific schemas, per-agent calibration, VIF→PCA→RidgeCV, late-fusion by skill • Designed & Developed by Jit")
+st.caption("• Role-specific schemas, per-agent calibration, VIF→PCA→RidgeCV, late-fusion by skill • Designed & Developed by Jit")
