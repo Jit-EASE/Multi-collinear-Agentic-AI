@@ -37,8 +37,8 @@ except Exception:
     HAS_GEMINI = False
 
 # ---------------- Streamlit Setup ----------------
-st.set_page_config(page_title="Agentic AI Multicollinearity Suite v2.6", page_icon="🧮", layout="wide")
-st.markdown("### Agentic AI Multicollinearity Suite — v2.6")
+st.set_page_config(page_title="Agri-Agent Econometrics Suite", page_icon="🧮", layout="wide")
+st.markdown("### Agri-Agent Econometrics Suite")
 
 # ---------------- Utilities ----------------
 def hash_key(obj: dict) -> str:
