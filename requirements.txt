@@ -1,0 +1,8 @@
+streamlit 
+openai 
+google-generativeai 
+plotly 
+statsmodels
+scikit-learn 
+pandas 
+numpy
