@@ -27,7 +27,7 @@ except Exception:
 
 HAS_GEMINI = True
 try:
-    import google.generativeai as genai
+    import GEMINI.generativeai as genai
 except Exception:
     HAS_GEMINI = False
 
@@ -102,7 +102,7 @@ def call_openai_json(client, system_prompt: str, user_prompt: str, temperature: 
 def call_gemini_json(system_prompt: str, user_prompt: str, temperature: float=0.6, max_tokens: int=320) -> str:
     if not HAS_GEMINI: return None
     try:
-        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
         model = genai.GenerativeModel("gemini-2.5-pro")
         resp = model.generate_content(
             [system_prompt, user_prompt],
@@ -115,7 +115,7 @@ def call_gemini_json(system_prompt: str, user_prompt: str, temperature: float=0.
 def assign_models(n_agents: int, heterogeneous: bool, force_provider: str=None) -> List[str]:
     providers = []
     if os.getenv("OPENAI_API_KEY"): providers.append("openai")
-    if os.getenv("GOOGLE_API_KEY"): providers.append("gemini")
+    if os.getenv("GEMINI_API_KEY"): providers.append("gemini")
     if force_provider in {"openai","gemini"}:
         providers = [force_provider] if force_provider in providers else providers
     if not providers: providers = ["openai"]
@@ -124,7 +124,7 @@ def assign_models(n_agents: int, heterogeneous: bool, force_provider: str=None) 
     return [providers[i % len(providers)] for i in range(n_agents)]
 
 def provider_label(provider: str) -> str:
-    return "GPT-4o-mini (OpenAI)" if provider=="openai" else "Gemini 2.5 (Google)"
+    return "GPT-4o-mini (OpenAI)" if provider=="openai" else "Gemini 2.5 (GEMINI)"
 
 # ========== General Lab ==========
 GEN_KEYS = ["policy","efficiency","risk","feasibility","evidence","final_score"]
@@ -318,11 +318,11 @@ st.markdown("### Agentic AI Multicollinearity Suite — v2.3")
 
 st.sidebar.subheader("Provider Status")
 st.sidebar.write(f"OpenAI key detected: {'✅' if os.getenv('OPENAI_API_KEY') else '❌'}")
-st.sidebar.write(f"Gemini key detected: {'✅' if os.getenv('GOOGLE_API_KEY') else '❌'}")
-if HAS_GEMINI and os.getenv("GOOGLE_API_KEY"):
+st.sidebar.write(f"Gemini key detected: {'✅' if os.getenv('GEMINI_API_KEY') else '❌'}")
+if HAS_GEMINI and os.getenv("GEMINI_API_KEY"):
     if st.sidebar.button("Test Gemini call", key="sidebar_test_gemini_v23"):
         try:
-            genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+            genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
             model = genai.GenerativeModel("gemini-2.5-pro")
             resp = model.generate_content("Reply with JSON: {\"ok\": true}")
             st.sidebar.success(f"Gemini responded: {getattr(resp, 'text', '')[:60]}")
