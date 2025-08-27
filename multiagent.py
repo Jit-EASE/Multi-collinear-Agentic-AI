@@ -1,27 +1,13 @@
-# Includes BOTH the General/Policy
-# and Agriculture multicollinearity labs 
+# Fix the import error by generating a corrected version of the unified suite.
+# Specifically, remove the misspelled fallback import and use the proper statsmodels path.
 
-# agentic_ai_multicollinearity_suite.py
+# agentic_ai_multicollinearity_suite.py (Corrected Import)
 # ------------------------------------------------------------------
 # Agentic AI Multicollinearity Suite
 # Tabs:
-#   1) General/Policy Lab (scores: policy, efficiency, risk, feasibility, evidence, final_score)
-#   2) Agriculture Lab (scores: irrigation_mm, nitrogen_kg, pest_risk, yield_gain, water_stress, final_score)
+#   1) General/Policy Lab
+#   2) Agriculture Lab
 # Designed & Developed by Jit
-# ------------------------------------------------------------------
-# Features
-# - Homogeneous (single LLM multi-agent) vs Heterogeneous (multi-LLM committee)
-# - Supports GPT-4o-mini (OpenAI) and Gemini 2.5 (Google) with role prompts
-# - Correlation heatmap, VIF, Condition Index, PCA dominance; CSV/JSON export
-# - Debate/consensus (post-analysis) preserved for transparency (not used in VIF)
-# - Deterministic caching via stringified config keys (avoids unhashable objects)
-# ------------------------------------------------------------------
-# Prereqs
-# pip install streamlit openai google-generativeai plotly statsmodels scikit-learn pandas numpy
-#
-# Env vars
-#   OPENAI_API_KEY=sk-...
-#   GOOGLE_API_KEY=AIza-...
 # ------------------------------------------------------------------
 
 import os, re, json, hashlib, textwrap, random
@@ -33,13 +19,7 @@ import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 
-from statsmodels.stats.outliers_inflence import variance_inflation_factor as _vif  # fallback if misspelt
-try:
-    from statsmodels.stats.outliers_influence import variance_inflation_factor
-except Exception:
-    # Some environments have a misspelling import; map it
-    variance_inflation_factor = _vif
-
+from statsmodels.stats.outliers_influence import variance_inflation_factor
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
@@ -76,7 +56,7 @@ with st.expander("Quick Start", expanded=False):
     **Keys**
     ```bash
     export OPENAI_API_KEY="sk-..."
-    export GOOGLE_API_KEY="AIza..."
+    export GOOGLE_API_KEY="AIza-..."
     ```
     **Install**
     ```bash
@@ -166,7 +146,6 @@ def call_openai_json(client, system_prompt: str, user_prompt: str, temperature: 
         )
         return resp.choices[0].message.content
     except Exception as e:
-        # safe fallback
         return None
 
 def call_gemini_json(system_prompt: str, user_prompt: str, temperature: float=0.6, max_tokens: int=320) -> str:
@@ -240,7 +219,6 @@ def run_general_lab(cfg: dict) -> dict:
             else:
                 txt = call_gemini_json(GEN_SYSTEM, uprompt, temperature=t_gemini)
             if txt is None:
-                # robust fallback
                 txt = '{"policy":60,"efficiency":60,"risk":40,"feasibility":55,"evidence":50,"final_score":55}'
             parsed = parse_json_block(txt, GEN_KEYS)
             a_scores.append(parsed.get("final_score", None))
@@ -254,14 +232,12 @@ def run_general_lab(cfg: dict) -> dict:
     consensus = None
 
     if debate and len(predeb) > 0:
-        # Build a quick consensus pass (not used for VIF)
         summary = {"rounds": predeb}
         c_prompt = textwrap.dedent(f"""
         Compute a CONSENSUS final_score (0-100) using a robust trimmed mean across agents per task.
         Return ONLY JSON: {{ "consensus": [ ... numbers ... ] }}
         DATA: {json.dumps(summary)[:12000]}
         """)
-        # Prefer OpenAI for consensus
         c_txt = call_openai_json(oa, "Be numeric only.", c_prompt, temperature=0.1, max_tokens=400) \
                 or call_gemini_json("Be numeric only.", c_prompt, temperature=0.1, max_tokens=400) \
                 or '{"consensus": []}'
@@ -392,7 +368,6 @@ with tab1:
                "t_openai":t_openai,"t_gemini":t_gemini,"prompts":prompts}
         key = hash_key(cfg)
         with st.spinner("Running committee and computing diagnostics..."):
-            # Avoid unhashable cache issues: cache by JSON string only if desired
             res = run_general_lab(cfg)
 
         X, corr, vif, cidx, pc1, models, consensus = res["X"], res["corr"], res["vif"], res["cond"], res["pc1"], res["models"], res["consensus"]
@@ -529,4 +504,3 @@ with tab3:
 
 st.markdown("<hr/>", unsafe_allow_html=True)
 st.markdown("<div style='text-align:center;opacity:0.7;'>© Designed & Developed by Jit — Agentic AI Multicollinearity Suite</div>", unsafe_allow_html=True)
-
