@@ -1,7 +1,8 @@
 
-# agentic_ai_multicollinearity_suite_v2_2.py
+# agentic_ai_multicollinearity_suite_v2_3.py
 # ------------------------------------------------------------------
-# v2.2: Robust OLS section (NaN row drop, guaranteed constant, length-safe coef/SE arrays).
+# v2.3: Fix StreamlitDuplicateElementId by giving every widget a unique key.
+# Also keeps robust OLS handling and Gemini/OpenAI provider controls.
 # ------------------------------------------------------------------
 
 import os, re, json, hashlib, textwrap, random
@@ -26,11 +27,11 @@ except Exception:
 
 HAS_GEMINI = True
 try:
-    import GEMINI.generativeai as genai
+    import google.generativeai as genai
 except Exception:
     HAS_GEMINI = False
 
-st.set_page_config(page_title="Agentic AI Multicollinearity Suite v2.2", page_icon="🧮", layout="wide")
+st.set_page_config(page_title="Agentic AI Multicollinearity Suite v2.3", page_icon="🧮", layout="wide")
 
 def hash_key(obj: dict) -> str:
     try: s = json.dumps(obj, sort_keys=True, ensure_ascii=False)
@@ -101,7 +102,7 @@ def call_openai_json(client, system_prompt: str, user_prompt: str, temperature: 
 def call_gemini_json(system_prompt: str, user_prompt: str, temperature: float=0.6, max_tokens: int=320) -> str:
     if not HAS_GEMINI: return None
     try:
-        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
         model = genai.GenerativeModel("gemini-2.5-pro")
         resp = model.generate_content(
             [system_prompt, user_prompt],
@@ -114,7 +115,7 @@ def call_gemini_json(system_prompt: str, user_prompt: str, temperature: float=0.
 def assign_models(n_agents: int, heterogeneous: bool, force_provider: str=None) -> List[str]:
     providers = []
     if os.getenv("OPENAI_API_KEY"): providers.append("openai")
-    if os.getenv("GEMINI_API_KEY"): providers.append("gemini")
+    if os.getenv("GOOGLE_API_KEY"): providers.append("gemini")
     if force_provider in {"openai","gemini"}:
         providers = [force_provider] if force_provider in providers else providers
     if not providers: providers = ["openai"]
@@ -123,7 +124,7 @@ def assign_models(n_agents: int, heterogeneous: bool, force_provider: str=None) 
     return [providers[i % len(providers)] for i in range(n_agents)]
 
 def provider_label(provider: str) -> str:
-    return "GPT-4o-mini (OpenAI)" if provider=="openai" else "Gemini 2.5 (GEMINI)"
+    return "GPT-4o-mini (OpenAI)" if provider=="openai" else "Gemini 2.5 (Google)"
 
 # ========== General Lab ==========
 GEN_KEYS = ["policy","efficiency","risk","feasibility","evidence","final_score"]
@@ -313,31 +314,39 @@ def run_agri_lab(cfg: dict) -> dict:
             "reg_df": reg_df, "reg_summary": reg_summary}
 
 # --------- UI ---------
-HEADER = "### Agentic AI Multicollinearity Suite — v2.2"
-st.markdown(HEADER)
+st.markdown("### Agentic AI Multicollinearity Suite — v2.3")
 
 st.sidebar.subheader("Provider Status")
 st.sidebar.write(f"OpenAI key detected: {'✅' if os.getenv('OPENAI_API_KEY') else '❌'}")
-st.sidebar.write(f"Gemini key detected: {'✅' if os.getenv('GEMINI_API_KEY') else '❌'}")
+st.sidebar.write(f"Gemini key detected: {'✅' if os.getenv('GOOGLE_API_KEY') else '❌'}")
+if HAS_GEMINI and os.getenv("GOOGLE_API_KEY"):
+    if st.sidebar.button("Test Gemini call", key="sidebar_test_gemini_v23"):
+        try:
+            genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+            model = genai.GenerativeModel("gemini-2.5-pro")
+            resp = model.generate_content("Reply with JSON: {\"ok\": true}")
+            st.sidebar.success(f"Gemini responded: {getattr(resp, 'text', '')[:60]}")
+        except Exception as e:
+            st.sidebar.error(f"Gemini error: {e}")
 
 tab1, tab2 = st.tabs(["General / Policy Lab", "Agriculture Lab"])
 
 with tab1:
     left, right = st.columns([0.6, 0.4])
     with left:
-        mode = st.radio("System Type", ["Homogeneous (single LLM)", "Heterogeneous (multi-LLM)"], index=1)
+        mode = st.radio("System Type (General)", ["Homogeneous (single LLM)", "Heterogeneous (multi-LLM)"], index=1, key="g_radio_mode_v23")
         heterogeneous = mode.startswith("Heterogeneous")
-        n_agents = st.slider("Agents", 2, 6, 3, 1)
-        use_roles = st.checkbox("Role specialization", value=heterogeneous)
-        t_openai = st.slider("OpenAI GPT-4o-mini temperature", 0.0, 1.5, 0.7, 0.1)
-        t_gemini = st.slider("Gemini 2.5 temperature", 0.0, 1.5, 0.7, 0.1)
-        force_provider = st.selectbox("Force provider (debug)", ["auto", "openai only", "gemini only"], index=0)
+        n_agents = st.slider("Agents (General)", 2, 6, 3, 1, key="g_slider_agents_v23")
+        use_roles = st.checkbox("Role specialization (General)", value=heterogeneous, key="g_roles_v23")
+        t_openai = st.slider("OpenAI GPT-4o-mini temperature (General)", 0.0, 1.5, 0.7, 0.1, key="g_temp_oa_v23")
+        t_gemini = st.slider("Gemini 2.5 temperature (General)", 0.0, 1.5, 0.7, 0.1, key="g_temp_ge_v23")
+        force_provider = st.selectbox("Force provider (General)", ["auto", "openai only", "gemini only"], index=0, key="g_force_v23")
         fp = None if force_provider=="auto" else ("openai" if "openai" in force_provider else "gemini")
     with right:
         default_text = "\n".join(GEN_DEFAULT_PROMPTS)
-        ptext = st.text_area("Prompts (one per line)", value=default_text, height=220)
+        ptext = st.text_area("Prompts (General) — one per line", value=default_text, height=220, key="g_prompts_v23")
         prompts = [p.strip() for p in ptext.splitlines() if p.strip()]
-        run_g = st.button("▶️ Run General/Policy", use_container_width=True)
+        run_g = st.button("▶️ Run General/Policy", use_container_width=True, key="g_run_v23")
 
     if run_g:
         cfg = {"n_agents":n_agents,"heterogeneous":heterogeneous,"use_roles":use_roles,
@@ -352,33 +361,33 @@ with tab1:
         c3.metric("Condition Index", f"{cidx:0.2f}" if np.isfinite(cidx) else "—")
         c4.metric("PCA Var(PC1)", f"{pc1*100:0.1f}%" if not np.isnan(pc1) else "—")
 
-        st.markdown("### Correlation Heatmap"); st.plotly_chart(px.imshow(corr, text_auto=True, zmin=-1, zmax=1), use_container_width=True)
-        st.markdown("### VIF"); st.plotly_chart(go.Figure(data=[go.Bar(x=vif["feature"], y=vif["VIF"])]), use_container_width=True)
-        st.dataframe(vif, use_container_width=True)
+        st.markdown("### Correlation Heatmap"); st.plotly_chart(px.imshow(corr, text_auto=True, zmin=-1, zmax=1), use_container_width=True, key="g_corr_plot_v23")
+        st.markdown("### VIF"); st.plotly_chart(go.Figure(data=[go.Bar(x=vif["feature"], y=vif["VIF"])]), use_container_width=True, key="g_vif_plot_v23")
+        st.dataframe(vif, use_container_width=True, key="g_vif_df_v23")
 
         st.markdown("### OLS Coefficients (±95% CI)")
         fig = go.Figure(); fig.add_bar(x=reg_df["Agent"], y=reg_df["coef"],
                                        error_y=dict(type="data", array=reg_df["se"]*1.96, visible=True))
-        st.plotly_chart(fig, use_container_width=True)
-        st.expander("Regression summary").text(reg_summary)
+        st.plotly_chart(fig, use_container_width=True, key="g_coef_plot_v23")
+        st.expander("Regression summary (General)", expanded=False).text(reg_summary)
 
-        st.markdown("### Raw matrix"); st.dataframe(X, use_container_width=True, height=260)
+        st.markdown("### Raw matrix"); st.dataframe(X, use_container_width=True, height=260, key="g_raw_df_v23")
 
 with tab2:
     left, right = st.columns([0.6, 0.4])
     with left:
-        mode_a = st.radio("System Type", ["Homogeneous (single LLM)", "Heterogeneous (multi-LLM)"], index=1)
+        mode_a = st.radio("System Type (Agriculture)", ["Homogeneous (single LLM)", "Heterogeneous (multi-LLM)"], index=1, key="a_radio_mode_v23")
         heterogeneous_a = mode_a.startswith("Heterogeneous")
-        n_agents_a = st.slider("Agents (agri)", 2, 6, 3, 1)
-        use_roles_a = st.checkbox("Role specialization (agri)", value=True)
-        t_openai_a = st.slider("OpenAI GPT-4o-mini temperature (agri)", 0.0, 1.5, 0.6, 0.1)
-        t_gemini_a = st.slider("Gemini 2.5 temperature (agri)", 0.0, 1.5, 0.6, 0.1)
-        force_provider_a = st.selectbox("Force provider (agri)", ["auto", "openai only", "gemini only"], index=0)
+        n_agents_a = st.slider("Agents (Agriculture)", 2, 6, 3, 1, key="a_slider_agents_v23")
+        use_roles_a = st.checkbox("Role specialization (Agriculture)", value=True, key="a_roles_v23")
+        t_openai_a = st.slider("OpenAI GPT-4o-mini temperature (Agriculture)", 0.0, 1.5, 0.6, 0.1, key="a_temp_oa_v23")
+        t_gemini_a = st.slider("Gemini 2.5 temperature (Agriculture)", 0.0, 1.5, 0.6, 0.1, key="a_temp_ge_v23")
+        force_provider_a = st.selectbox("Force provider (Agriculture)", ["auto", "openai only", "gemini only"], index=0, key="a_force_v23")
         fp_a = None if force_provider_a=="auto" else ("openai" if "openai" in force_provider_a else "gemini")
     with right:
-        n_fields = st.slider("Number of field snapshots", 5, 40, 12, 1)
-        seed = st.number_input("Random seed", value=0, step=1)
-        run_a = st.button("▶️ Run Agriculture", use_container_width=True)
+        n_fields = st.slider("Number of field snapshots (Agriculture)", 5, 40, 12, 1, key="a_fields_v23")
+        seed = st.number_input("Random seed (Agriculture)", value=0, step=1, key="a_seed_v23")
+        run_a = st.button("▶️ Run Agriculture", use_container_width=True, key="a_run_v23")
 
     if run_a:
         cfg_a = {"n_agents":n_agents_a,"heterogeneous":heterogeneous_a,"use_roles":use_roles_a,
@@ -393,14 +402,14 @@ with tab2:
         c3.metric("Condition Index", f"{cidx:0.2f}" if np.isfinite(cidx) else "—")
         c4.metric("PCA Var(PC1)", f"{pc1*100:0.1f}%" if not np.isnan(pc1) else "—")
 
-        st.markdown("### Correlation Heatmap"); st.plotly_chart(px.imshow(corr, text_auto=True, zmin=-1, zmax=1), use_container_width=True)
-        st.markdown("### VIF"); st.plotly_chart(go.Figure(data=[go.Bar(x=vif["feature"], y=vif["VIF"])]), use_container_width=True)
-        st.dataframe(vif, use_container_width=True)
+        st.markdown("### Correlation Heatmap"); st.plotly_chart(px.imshow(corr, text_auto=True, zmin=-1, zmax=1), use_container_width=True, key="a_corr_plot_v23")
+        st.markdown("### VIF"); st.plotly_chart(go.Figure(data=[go.Bar(x=vif["feature"], y=vif["VIF"])]), use_container_width=True, key="a_vif_plot_v23")
+        st.dataframe(vif, use_container_width=True, key="a_vif_df_v23")
 
         st.markdown("### OLS Coefficients (±95% CI)")
         fig = go.Figure(); fig.add_bar(x=reg_df["Agent"], y=reg_df["coef"],
                                        error_y=dict(type="data", array=reg_df["se"]*1.96, visible=True))
-        st.plotly_chart(fig, use_container_width=True)
-        st.expander("Regression summary").text(reg_summary)
+        st.plotly_chart(fig, use_container_width=True, key="a_coef_plot_v23")
+        st.expander("Regression summary (Agriculture)", expanded=False).text(reg_summary)
 
-        st.markdown("### Raw matrix"); st.dataframe(X, use_container_width=True, height=260)
+        st.markdown("### Raw matrix"); st.dataframe(X, use_container_width=True, height=260, key="a_raw_df_v23")
