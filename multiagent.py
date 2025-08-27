@@ -1,8 +1,9 @@
 
-# agentic_ai_multicollinearity_suite_v2_3.py
+# agentic_ai_multicollinearity_suite_v2_4.py
 # ------------------------------------------------------------------
-# v2.3: Fix StreamlitDuplicateElementId by giving every widget a unique key.
-# Also keeps robust OLS handling and Gemini/OpenAI provider controls.
+# v2.4: Adds NLP explanations for Correlation, VIF, Regression, and Overall diagnostics.
+# - Unique widget keys preserved (from v2.3)
+# - Robust OLS & Gemini/OpenAI alternation preserved (from v2.2/v2.3)
 # ------------------------------------------------------------------
 
 import os, re, json, hashlib, textwrap, random
@@ -31,8 +32,9 @@ try:
 except Exception:
     HAS_GEMINI = False
 
-st.set_page_config(page_title="Agentic AI Multicollinearity Suite v2.3", page_icon="🧮", layout="wide")
+st.set_page_config(page_title="Agentic AI Multicollinearity Suite v2.4", page_icon="🧮", layout="wide")
 
+# ---------------- Utilities ----------------
 def hash_key(obj: dict) -> str:
     try: s = json.dumps(obj, sort_keys=True, ensure_ascii=False)
     except Exception: s = str(obj)
@@ -126,7 +128,92 @@ def assign_models(n_agents: int, heterogeneous: bool, force_provider: str=None) 
 def provider_label(provider: str) -> str:
     return "GPT-4o-mini (OpenAI)" if provider=="openai" else "Gemini 2.5 (GEMINI)"
 
-# ========== General Lab ==========
+# ---------------- NLP Explanation Builders ----------------
+def explain_corr(corr: pd.DataFrame) -> str:
+    try:
+        M = corr.copy()
+        if M.shape[0] < 2: return "Not enough agents to compute correlations."
+        # Upper triangle without diagonal
+        mask = np.triu(np.ones(M.shape, dtype=bool), k=1)
+        vals = M.where(mask).stack()
+        if vals.empty: return "Correlation matrix is empty."
+        max_pair = vals.abs().idxmax()
+        max_val = float(vals.loc[max_pair])
+        mean_abs = float(vals.abs().mean())
+        txt = []
+        txt.append(f"Average |correlation| across agent pairs: **{mean_abs:.2f}**.")
+        txt.append(f"Strongest pair: **{max_pair[0]}–{max_pair[1]} = {max_val:.2f}**.")
+        if mean_abs >= 0.6 or abs(max_val) >= 0.9:
+            txt.append("This indicates **high collinearity**; agents are giving very similar signals.")
+        elif mean_abs >= 0.4:
+            txt.append("This suggests **moderate collinearity**; some redundancy is present.")
+        else:
+            txt.append("This looks **diverse**; agent signals are relatively independent.")
+        return " ".join(txt)
+    except Exception:
+        return "Correlation explanation unavailable (unexpected data shape)."
+
+def explain_vif(vif_df: pd.DataFrame) -> str:
+    try:
+        df = vif_df.dropna()
+        if df.empty: return "VIF not available (insufficient rows/agents)."
+        severe = df[df["VIF"] >= 10].shape[0]
+        moderate = df[(df["VIF"] >= 5) & (df["VIF"] < 10)].shape[0]
+        top = df.iloc[df["VIF"].idxmax()]
+        txt = [f"Max VIF is **{top['VIF']:.1f}** for **{top['feature']}**."]
+        if severe > 0:
+            txt.append(f"**{severe}** agent variables exceed the **10** threshold (severe multicollinearity).")
+        elif moderate > 0:
+            txt.append(f"**{moderate}** agent variables are in the **5–10** range (moderate multicollinearity).")
+        else:
+            txt.append("No VIFs exceed **5** — collinearity appears limited.")
+        txt.append("High VIF inflates standard errors and destabilizes regression coefficients.")
+        return " ".join(txt)
+    except Exception:
+        return "VIF explanation unavailable."
+
+def explain_overall(cidx: float, pc1: float, providers: list) -> str:
+    prov_kind = "heterogeneous (multi-LLM)" if len(set(providers)) > 1 else "homogeneous (single LLM)"
+    pieces = [f"System detected as **{prov_kind}**."]
+    if np.isfinite(cidx):
+        if cidx > 30:
+            pieces.append(f"Condition Index **{cidx:.1f}** → **serious multicollinearity**.")
+        elif cidx > 10:
+            pieces.append(f"Condition Index **{cidx:.1f}** → **moderate multicollinearity**.")
+        else:
+            pieces.append(f"Condition Index **{cidx:.1f}** → **low multicollinearity**.")
+    if not np.isnan(pc1):
+        if pc1 >= 0.6:
+            pieces.append(f"PC1 explains **{pc1*100:.1f}%** of variance → **redundant signals** dominate.")
+        elif pc1 >= 0.4:
+            pieces.append(f"PC1 explains **{pc1*100:.1f}%** → **some redundancy**.")
+        else:
+            pieces.append(f"PC1 explains **{pc1*100:.1f}%** → **diverse signals**.")
+    pieces.append("To reduce collinearity, increase model diversity (providers), enable role specialization, or adjust temperature.")
+    return " ".join(pieces)
+
+def explain_regression(reg_df: pd.DataFrame) -> str:
+    if reg_df is None or reg_df.empty or reg_df["coef"].isna().all():
+        return "Not enough observations to estimate a stable regression. Increase the number of tasks/fields."
+    try:
+        halfwidth = reg_df["se"] * 1.96
+        widest_idx = int(halfwidth.idxmax())
+        widest_agent = reg_df.loc[widest_idx, "Agent"]
+        med_hw = float(np.nanmedian(halfwidth))
+        txt = [f"Median 95% CI half-width: **{med_hw:.2f}**."]
+        txt.append(f"Widest CI: **{widest_agent}** (±{halfwidth.max():.2f}).")
+        if med_hw > 3:
+            txt.append("CIs are **wide** → coefficients are unstable, consistent with multicollinearity.")
+        elif med_hw > 1.5:
+            txt.append("CIs are **moderate** → some instability present.")
+        else:
+            txt.append("CIs are **tight** → coefficients are relatively stable.")
+        txt.append("Interpret coefficients cautiously; multicollinearity affects **standard errors** more than point estimates.")
+        return " ".join(txt)
+    except Exception:
+        return "Regression explanation unavailable."
+
+# ---------------- Labs ----------------
 GEN_KEYS = ["policy","efficiency","risk","feasibility","evidence","final_score"]
 GEN_SCHEMA = ("Return ONLY a JSON object with keys: policy, efficiency, risk, feasibility, evidence, final_score. "
               "Each 0-100 integer.")
@@ -183,7 +270,6 @@ def run_general_lab(cfg: dict) -> dict:
     y = X.mean(axis=1).values + np.random.normal(0, 1.0, size=X.shape[0])
     mask = np.isfinite(X.values).all(axis=1) & np.isfinite(y)
     X_design = X.values[mask]; y_design = y[mask]
-    # need at least p+2 obs where p = n_agents
     if X_design.shape[0] >= (X_design.shape[1] + 2):
         X_ols = sm.add_constant(X_design, has_constant='add')
         model = sm.OLS(y_design, X_ols).fit()
@@ -202,7 +288,7 @@ def run_general_lab(cfg: dict) -> dict:
     return {"X":X, "corr":corr, "vif":vif, "cond":cidx, "pc1":pc1, "providers":providers,
             "reg_df": reg_df, "reg_summary": reg_summary}
 
-# ========== Agriculture Lab ==========
+# ---- Agriculture Lab ----
 AG_KEYS = ["irrigation_mm","nitrogen_kg","pest_risk","yield_gain","water_stress","final_score"]
 AG_SCHEMA = ("Return ONLY a JSON object with keys: irrigation_mm (0-60), nitrogen_kg (0-60), "
              "pest_risk (0-100), yield_gain (0-100), water_stress (0-100), final_score (0-100).")
@@ -313,14 +399,14 @@ def run_agri_lab(cfg: dict) -> dict:
     return {"X":X, "corr":corr, "vif":vif, "cond":cidx, "pc1":pc1, "providers":providers,
             "reg_df": reg_df, "reg_summary": reg_summary}
 
-# --------- UI ---------
-st.markdown("### Agentic AI Multicollinearity Suite — v2.3")
+# ---------------- UI ----------------
+st.markdown("### Agentic AI Multicollinearity Suite — v2.4")
 
 st.sidebar.subheader("Provider Status")
 st.sidebar.write(f"OpenAI key detected: {'✅' if os.getenv('OPENAI_API_KEY') else '❌'}")
 st.sidebar.write(f"Gemini key detected: {'✅' if os.getenv('GEMINI_API_KEY') else '❌'}")
 if HAS_GEMINI and os.getenv("GEMINI_API_KEY"):
-    if st.sidebar.button("Test Gemini call", key="sidebar_test_gemini_v23"):
+    if st.sidebar.button("Test Gemini call", key="sidebar_test_gemini_v24"):
         try:
             genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
             model = genai.GenerativeModel("gemini-2.5-pro")
@@ -334,19 +420,19 @@ tab1, tab2 = st.tabs(["General / Policy Lab", "Agriculture Lab"])
 with tab1:
     left, right = st.columns([0.6, 0.4])
     with left:
-        mode = st.radio("System Type (General)", ["Homogeneous (single LLM)", "Heterogeneous (multi-LLM)"], index=1, key="g_radio_mode_v23")
+        mode = st.radio("System Type (General)", ["Homogeneous (single LLM)", "Heterogeneous (multi-LLM)"], index=1, key="g_radio_mode_v24")
         heterogeneous = mode.startswith("Heterogeneous")
-        n_agents = st.slider("Agents (General)", 2, 6, 3, 1, key="g_slider_agents_v23")
-        use_roles = st.checkbox("Role specialization (General)", value=heterogeneous, key="g_roles_v23")
-        t_openai = st.slider("OpenAI GPT-4o-mini temperature (General)", 0.0, 1.5, 0.7, 0.1, key="g_temp_oa_v23")
-        t_gemini = st.slider("Gemini 2.5 temperature (General)", 0.0, 1.5, 0.7, 0.1, key="g_temp_ge_v23")
-        force_provider = st.selectbox("Force provider (General)", ["auto", "openai only", "gemini only"], index=0, key="g_force_v23")
+        n_agents = st.slider("Agents (General)", 2, 6, 3, 1, key="g_slider_agents_v24")
+        use_roles = st.checkbox("Role specialization (General)", value=heterogeneous, key="g_roles_v24")
+        t_openai = st.slider("OpenAI GPT-4o-mini temperature (General)", 0.0, 1.5, 0.7, 0.1, key="g_temp_oa_v24")
+        t_gemini = st.slider("Gemini 2.5 temperature (General)", 0.0, 1.5, 0.7, 0.1, key="g_temp_ge_v24")
+        force_provider = st.selectbox("Force provider (General)", ["auto", "openai only", "gemini only"], index=0, key="g_force_v24")
         fp = None if force_provider=="auto" else ("openai" if "openai" in force_provider else "gemini")
     with right:
         default_text = "\n".join(GEN_DEFAULT_PROMPTS)
-        ptext = st.text_area("Prompts (General) — one per line", value=default_text, height=220, key="g_prompts_v23")
+        ptext = st.text_area("Prompts (General) — one per line", value=default_text, height=220, key="g_prompts_v24")
         prompts = [p.strip() for p in ptext.splitlines() if p.strip()]
-        run_g = st.button("▶️ Run General/Policy", use_container_width=True, key="g_run_v23")
+        run_g = st.button("▶️ Run General/Policy", use_container_width=True, key="g_run_v24")
 
     if run_g:
         cfg = {"n_agents":n_agents,"heterogeneous":heterogeneous,"use_roles":use_roles,
@@ -361,33 +447,43 @@ with tab1:
         c3.metric("Condition Index", f"{cidx:0.2f}" if np.isfinite(cidx) else "—")
         c4.metric("PCA Var(PC1)", f"{pc1*100:0.1f}%" if not np.isnan(pc1) else "—")
 
-        st.markdown("### Correlation Heatmap"); st.plotly_chart(px.imshow(corr, text_auto=True, zmin=-1, zmax=1), use_container_width=True, key="g_corr_plot_v23")
-        st.markdown("### VIF"); st.plotly_chart(go.Figure(data=[go.Bar(x=vif["feature"], y=vif["VIF"])]), use_container_width=True, key="g_vif_plot_v23")
-        st.dataframe(vif, use_container_width=True, key="g_vif_df_v23")
+        st.markdown("### Correlation Heatmap")
+        st.plotly_chart(px.imshow(corr, text_auto=True, zmin=-1, zmax=1), use_container_width=True, key="g_corr_plot_v24")
+        st.info(explain_corr(corr))
+
+        st.markdown("### VIF (Variance Inflation Factor)")
+        st.plotly_chart(go.Figure(data=[go.Bar(x=vif["feature"], y=vif["VIF"])]), use_container_width=True, key="g_vif_plot_v24")
+        st.dataframe(vif, use_container_width=True, key="g_vif_df_v24")
+        st.info(explain_vif(vif))
 
         st.markdown("### OLS Coefficients (±95% CI)")
         fig = go.Figure(); fig.add_bar(x=reg_df["Agent"], y=reg_df["coef"],
                                        error_y=dict(type="data", array=reg_df["se"]*1.96, visible=True))
-        st.plotly_chart(fig, use_container_width=True, key="g_coef_plot_v23")
-        st.expander("Regression summary (General)", expanded=False).text(reg_summary)
+        st.plotly_chart(fig, use_container_width=True, key="g_coef_plot_v24")
+        st.info(explain_regression(reg_df))
+        with st.expander("Regression summary (General)", expanded=False):
+            st.text(reg_summary)
 
-        st.markdown("### Raw matrix"); st.dataframe(X, use_container_width=True, height=260, key="g_raw_df_v23")
+        st.markdown("### Overall diagnosis")
+        st.warning(explain_overall(cidx, pc1, providers))
+
+        st.markdown("### Raw matrix"); st.dataframe(X, use_container_width=True, height=260, key="g_raw_df_v24")
 
 with tab2:
     left, right = st.columns([0.6, 0.4])
     with left:
-        mode_a = st.radio("System Type (Agriculture)", ["Homogeneous (single LLM)", "Heterogeneous (multi-LLM)"], index=1, key="a_radio_mode_v23")
+        mode_a = st.radio("System Type (Agriculture)", ["Homogeneous (single LLM)", "Heterogeneous (multi-LLM)"], index=1, key="a_radio_mode_v24")
         heterogeneous_a = mode_a.startswith("Heterogeneous")
-        n_agents_a = st.slider("Agents (Agriculture)", 2, 6, 3, 1, key="a_slider_agents_v23")
-        use_roles_a = st.checkbox("Role specialization (Agriculture)", value=True, key="a_roles_v23")
-        t_openai_a = st.slider("OpenAI GPT-4o-mini temperature (Agriculture)", 0.0, 1.5, 0.6, 0.1, key="a_temp_oa_v23")
-        t_gemini_a = st.slider("Gemini 2.5 temperature (Agriculture)", 0.0, 1.5, 0.6, 0.1, key="a_temp_ge_v23")
-        force_provider_a = st.selectbox("Force provider (Agriculture)", ["auto", "openai only", "gemini only"], index=0, key="a_force_v23")
+        n_agents_a = st.slider("Agents (Agriculture)", 2, 6, 3, 1, key="a_slider_agents_v24")
+        use_roles_a = st.checkbox("Role specialization (Agriculture)", value=True, key="a_roles_v24")
+        t_openai_a = st.slider("OpenAI GPT-4o-mini temperature (Agriculture)", 0.0, 1.5, 0.6, 0.1, key="a_temp_oa_v24")
+        t_gemini_a = st.slider("Gemini 2.5 temperature (Agriculture)", 0.0, 1.5, 0.6, 0.1, key="a_temp_ge_v24")
+        force_provider_a = st.selectbox("Force provider (Agriculture)", ["auto", "openai only", "gemini only"], index=0, key="a_force_v24")
         fp_a = None if force_provider_a=="auto" else ("openai" if "openai" in force_provider_a else "gemini")
     with right:
-        n_fields = st.slider("Number of field snapshots (Agriculture)", 5, 40, 12, 1, key="a_fields_v23")
-        seed = st.number_input("Random seed (Agriculture)", value=0, step=1, key="a_seed_v23")
-        run_a = st.button("▶️ Run Agriculture", use_container_width=True, key="a_run_v23")
+        n_fields = st.slider("Number of field snapshots (Agriculture)", 5, 40, 12, 1, key="a_fields_v24")
+        seed = st.number_input("Random seed (Agriculture)", value=0, step=1, key="a_seed_v24")
+        run_a = st.button("▶️ Run Agriculture", use_container_width=True, key="a_run_v24")
 
     if run_a:
         cfg_a = {"n_agents":n_agents_a,"heterogeneous":heterogeneous_a,"use_roles":use_roles_a,
@@ -402,14 +498,25 @@ with tab2:
         c3.metric("Condition Index", f"{cidx:0.2f}" if np.isfinite(cidx) else "—")
         c4.metric("PCA Var(PC1)", f"{pc1*100:0.1f}%" if not np.isnan(pc1) else "—")
 
-        st.markdown("### Correlation Heatmap"); st.plotly_chart(px.imshow(corr, text_auto=True, zmin=-1, zmax=1), use_container_width=True, key="a_corr_plot_v23")
-        st.markdown("### VIF"); st.plotly_chart(go.Figure(data=[go.Bar(x=vif["feature"], y=vif["VIF"])]), use_container_width=True, key="a_vif_plot_v23")
-        st.dataframe(vif, use_container_width=True, key="a_vif_df_v23")
+        st.markdown("### Correlation Heatmap")
+        st.plotly_chart(px.imshow(corr, text_auto=True, zmin=-1, zmax=1), use_container_width=True, key="a_corr_plot_v24")
+        st.info(explain_corr(corr))
+
+        st.markdown("### VIF (Variance Inflation Factor)")
+        st.plotly_chart(go.Figure(data=[go.Bar(x=vif["feature"], y=vif["VIF"])]), use_container_width=True, key="a_vif_plot_v24")
+        st.dataframe(vif, use_container_width=True, key="a_vif_df_v24")
+        st.info(explain_vif(vif))
 
         st.markdown("### OLS Coefficients (±95% CI)")
         fig = go.Figure(); fig.add_bar(x=reg_df["Agent"], y=reg_df["coef"],
                                        error_y=dict(type="data", array=reg_df["se"]*1.96, visible=True))
-        st.plotly_chart(fig, use_container_width=True, key="a_coef_plot_v23")
-        st.expander("Regression summary (Agriculture)", expanded=False).text(reg_summary)
+        st.plotly_chart(fig, use_container_width=True, key="a_coef_plot_v24")
+        st.info(explain_regression(reg_df))
+        with st.expander("Regression summary (Agriculture)", expanded=False):
+            st.text(reg_summary)
 
-        st.markdown("### Raw matrix"); st.dataframe(X, use_container_width=True, height=260, key="a_raw_df_v23")
+        st.markdown("### Overall diagnosis")
+        st.warning(explain_overall(cidx, pc1, providers))
+
+        st.markdown("### Raw matrix"); st.dataframe(X, use_container_width=True, height=260, key="a_raw_df_v24")
+
